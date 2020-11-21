@@ -1,0 +1,513 @@
+---
+title: "Analiza skupień"
+author: "Morozov Andrii"
+date: "25 10 2020"
+output: html_document
+---
+
+## **CEL PROJEKTU i HIPOTEZY BADAWCZE**
+
+**Celem projektu** jest sprawdzenie na danych "realnych" metod grupowania podzialowego oraz hierarchicznego. <br>
+Byla podjeta proba wyliczyc optymalna liczbe podzialow oraz liczbe skupien w oparciu o indeksy G1, G2, G3 oraz S. (funkcja BI) <br>
+
+**Hipoteza badawcza**: wyniki grupowania poszczegolnych metod **NIE** roznia sie istotnie.
+
+## **Metody grupowania wykorzystane w projekcie oraz inne podstawy **
+
+Dla **grupowania podzialowego**: metoda k-srednich oraz k-medoid. <br>
+Dla metody **k-medoid** odleglosci byly liczone metodami Euklidesa oraz "manhattan". <br>
+
+Dla **grupowania hierarchicznego** byla wykorzystana metoda **"ward.D"**,**"complete"** oraz **"average"**. <br>
+Odleglosci byly liczone metodami: Euklidesa, "manhattan" oraz Minkowskiego. <br>
+
+**Normalizacja** danych byla typu "n1", czyli **((x-mean)/sd)**. <br>
+
+**Indeksy G1, G2, G3 oraz S** byly liczone dla kazdego rodzaju metryk. <br>
+
+## ** NIEZBEDNE PAKIETY ORAZ FUNKCJE **
+
+```{r}
+library(clusterSim)
+library(ggpubr)
+library(factoextra)
+library(fpc)
+
+(WD <- getwd())
+if (!is.null(WD)) setwd(WD)
+name <- "CS_GO.csv"
+df <- read.csv(name, sep = ";", row.names = "obs")
+
+N = 50
+cnames <- c("index G1","index G2","index S","index G3")
+rnames <- c(2:N)
+
+#===== BEST INDEX =====
+
+BI <- function(choi, data, .dist, choi.dist = "EU") {
+  indG1 <- NULL
+  indG2 <- NULL
+  indG3 <- NULL
+  indS <- NULL
+  final_t <- NULL
+  for (j in 2:N){
+    if (choi == "H") {
+      temp <- cutree(data, j)
+      indG1[j-1] <- index.G1(df, cl = temp, d = .dist, centrotypes = "medoids")
+      indG2[j-1] <- index.G2(.dist, cl = temp)
+      indG3[j-1] <- index.G3(.dist, cl = temp)
+      indS[j-1] <- index.S(.dist, cl= temp)
+    } else if(choi == "PP") {
+      if (choi.dist == "EU") {
+      temp <- pam(data, i, metric = "euclidean", stand = FALSE)
+      indG1[j-1] <- index.G1(data, cl = temp$clustering, d = .dist, centrotypes = "medoids")
+      indG2[j-1] <- index.G2(.dist, cl = temp$clustering)
+      indG3[j-1] <- index.G3(.dist, cl = temp$clustering)
+      indS[j-1] <- index.S(.dist, cl= temp$clustering)
+      } else {
+        temp <- pam(data, i, metric = "manhattan", stand = FALSE)
+        indG1[j-1] <- index.G1(data, cl = temp$clustering, d = .dist, centrotypes = "medoids")
+        indG2[j-1] <- index.G2(.dist, cl = temp$clustering)
+        indG3[j-1] <- index.G3(.dist, cl = temp$clustering)
+        indS[j-1] <- index.S(.dist, cl= temp$clustering)
+      }
+    } else if(choi == "PK") {
+        temp <- kmeans(data, i, nstart = 50, iter.max = 50 )
+        indG1[j-1] <- index.G1(data, cl = temp$cluster, d = .dist, centrotypes = "centroids")
+        indG2[j-1] <- index.G2(.dist, cl = temp$cluster)
+        indG3[j-1] <- index.G3(.dist, cl = temp$cluster)
+        indS[j-1] <- index.S(.dist, cl= temp$cluster)
+    } else {
+      print("prosze podac wlasciwe grupowanie H lub PP lub PK !")
+      break
+    }
+  }
+  final_t <- list(indG1,indG2,indS,indG3)
+  return(final_t)
+}
+```
+<br>
+## **OPIS DANYCH **
+
+Dane statystyczne były pobrane ze strony internetowej **https://www.hltv.org/**. <br> Był wybrany turniej **„DreamHack Masters Spring 2020 – Europe”** i pobrane wyniki sportowców w fazie grupowej za każdą zagraną „kartę”. <br> Wszystkie mecze były do 2 zwycięstw, czyli maksymalnie mogły być zagrane 3 „karty” w jednym meczu. <br> Dane były kopiowane ręcznie dla każdego gracza bezpośrednio ze strony internetowej do pliku EXCEL. <br>
+
+**Zmienne**: <br>
+•	Rating_2.0 – wyliczony indywidualnie dla każdego sportowca przez organizacje **„HLTV”** wskaźnik reprezentujący kumulację wyników gracza za jedną „kartę”. Organizacja „HLTV” **NIE** podaje wzoru do obliczenia danego wskaźnika. <br>
+•	Kills – liczba „zabójstw” zrobionych przez gracza za jedną „kartę”. <br>
+•	Assists - liczba „pomocy” zrobionych przez gracza za jedną „kartę”. Aby uzyskać „pomóc” „gracz 1” musi zadać co najmniej 41 punktów obrażeń lub więcej, a następnie przeciwnik zostaje zabity przez „gracza 2”. <br>
+•	 Deaths – liczba „śmierci” gracza za „kartę”. Każdy gracz na początku każdej rundy ma 100 punktów zdrowotnych, jeżeli liczba punktów zdrowotnych spadnie do 0 następuje „śmierć” gracza. <br>
+•	KAST - mierzy odsetek rund, w których gracz bierze udział zabijając przeciwnika, pomagając sojusznikowi lub przeżywając rundę. <br>
+•	ADR – sumaryczna liczba „obrażeń” zadanych graczem drużynie przeciwnika podzielona przez liczbę rund zagranych za „kartę”. <br>
+•	Impact – wskaźnik liczony indywidualni dla każdego sportowca po zagranej „karcie”. Organizacja „HLTV” **NIE** podaje dokładnego wzoru do obliczenia danego wskaźnika. Mierzy „wpływ” gracza na „karcie” oparty o liczbę „multi-zabójstw”, zrobionych "zabójstw-otwarć" (pierwsze zabójstwo w rundzie), wygranych sytuacji gdy gracz zostaje sam przeciwko drużynie przeciwnika, itd. <br>
+•	AGE – aktualny wiek sportowca. <br>
+
+## WSTEPNA ANALIZA DANYCH
+
+Plik **"CS_GO.csf"** bedzie dolaczony do sprawozdania. Na wstepie mamy 520 obserwacji. Kazda obserwacja to wyniki zawarte w zmiennych opisanych wyzej dla jednego gracza. <br>
+```{r echo=FALSE}
+w <- c(1:ncol(df))
+for (i in 1:ncol(df)) {
+  w[i] <- sd(df[[i]], na.rm=TRUE)/mean(df[[i]], na.rm=TRUE)*100
+}
+round(cor(df),3) #korelacja
+w #wsp.zmiennosci
+```
+Macierz korelacji nie wykazala wartosci powyzej 0.9 -> brak efektu wspolliniowosci. <br>
+Wsp.zmiennosci na dole dla kazdej zmiennej wynosi >10% -> brak "quazi" stalych zmiennych. <br>
+```{r}
+boxplot(df, horizontal = TRUE)
+summary(df)
+```
+
+Na wykresie widac, ze dane pochodza z roznych rozkladow oraz widac spora liczbe "outlierow". <br>
+Statystyki opisowe rowniez to potwierdzaja. <br>
+```{r, echo=FALSE}
+boxplot(dfS <- data.Normalization(df, type="n1"), horizontal = TRUE)
+summary(dfS)
+```
+Na wykresie widac, ze "porownywalnosc" danych po **standaryzacji** nieco poprawila sie. <br>
+Wykres pudelkowy pokazuje, ze poza granicami **3-sigm** znajduje sie jedna, maksymalnie 3 obserwacji. <br>
+Nadal sa "outliery", ale dla zbioru danych z 520 obserwacjami ich liczba jest znikoma. <br>
+Zbior danych nadaje sie dla dalszej analizy. <br>
+
+## **LICZBA PODZIALOW** oraz **SKUPIEN, metoda "ward.D"**
+
+Optymalna liczba podzialow bedzie liczona dla metod opisanych wyzej z uwzglednieniem roznych metryk. <br>
+Teoretycznie dla 520 obserwacji, liczba skupien oraz podzialow wynosi 519 jednostek. <br>
+Ze wzgledu na czasochlonnosc obliczen i brak takiej mocy obliczeniowej, optymalna liczba skupien oraz podzialow bedzie ustalona dla maksymalnie 50 jednostek. <br>
+Dla kazdej z metod oraz metryk bedzie stworzona tablica, w kolumnach ktorej beda wartosci **indeksow G1, G2, S oraz G3** odpowiednio dla liczby klasterow od 2 do 50.<br>
+Dla **indeksow G1 G2 S** wybieramy maksymalna wartosc, dla **indeksu G3** minimalna. <br> 
+```{r echo=FALSE}
+ EU <-  dist(dfS, method = "euclidean")
+ MAN <- dist(dfS, method = "manhattan")
+ MIN <- dist(dfS, method = "minkowski", p=3)
+
+ HC.E <- hclust(EU, method = "ward.D") # metryka euklidesowa
+ HC.MAN <- hclust(MAN, method = "ward.D") # metryka manhattan
+ HC.MIN <- hclust(MIN, method = "ward.D") # metryka minkowski
+
+ Opt_kmE <- BI("PK", dfS, EU) # optymalna liczba podzialow dla k-srednich, metryka Euklidesa
+ Opt_kmMA <- BI("PK", dfS, MAN) # optymalna liczba podzialow dla k-srednich, metryka "manhattan"
+ Opt_kmMI <- BI("PK", dfS, MIN) # optymalna liczba podzialow dla k-srednich, metryka Minkowskiego
+ 
+ Opt_paE <- BI("PP", dfS, EU) # optymalna liczba podzialow dla k-medoid, metryka Euklidesa
+ Opt_paMA <- BI("PP", dfS, MAN, "MAN") # optymalna liczba podzialow dla k-medoid, "manhattan"
+ 
+ Opt_EU <- BI("H", HC.E, EU) # optymalna liczba skupien, metryka Euklidesa
+ Opt_MAN <- BI("H", HC.MAN, MAN) # optymalna liczba skupien, metryka "manhattan"
+ Opt_MIN <- BI("H", HC.MIN, MIN) # optymalna liczba skupien, metryka Minkowskiego
+```
+Dla metody podzialowej, k-srednich, **metryka Euklidesa**. <br>
+```{r echo=FALSE}
+Opt_kmE<-data.frame(Opt_kmE,row.names = rnames)
+colnames(Opt_kmE) <- cnames
+Opt_kmE
+```
+Dla metody podzialowej, k-srednich, **metryka "manhattan"**. <br>
+```{r echo=FALSE}
+Opt_kmMA<-data.frame(Opt_kmMA,row.names = rnames)
+colnames(Opt_kmMA) <- cnames
+Opt_kmMA
+```
+Dla metody podzialowej, k-srednich, **metryka Minkowskiego**. <br>
+```{r echo=FALSE}
+Opt_kmMI<-data.frame(Opt_kmMI,row.names = rnames)
+colnames(Opt_kmMI) <- cnames
+Opt_kmMI
+```
+Dla metody podzialowej, k-medoid, **metryka Euklidesa**. <br>
+```{r echo=FALSE}
+Opt_paE<-data.frame(Opt_paE,row.names = rnames)
+colnames(Opt_paE) <- cnames
+Opt_paE
+```
+Dla metody podzialowej, k-medoid, **metryka "manhattan"**. <br>
+```{r echo=FALSE}
+Opt_paMA<-data.frame(Opt_paMA,row.names = rnames)
+colnames(Opt_paMA) <- cnames
+Opt_paMA
+```
+Dla metody hierarchicznej, typu **ward.D**, **metryka Euklidesa**. <br>
+```{r echo=FALSE}
+Opt_EU<-data.frame(Opt_EU,row.names = rnames)
+colnames(Opt_EU) <- cnames
+Opt_EU
+```
+Dla metody hierarchicznej, typu **ward.D**, **metryka "manhattan"**. <br>
+```{r echo=FALSE}
+Opt_MAN<-data.frame(Opt_MAN,row.names = rnames)
+colnames(Opt_MAN) <- cnames
+Opt_MAN
+```
+Dla metody hierarchicznej, typu **ward.D**, **metryka Minkowskiego**. <br>
+```{r echo=FALSE}
+Opt_MIN<-data.frame(Opt_MIN,row.names = rnames)
+colnames(Opt_MIN) <- cnames
+Opt_MIN
+```
+## **GRAFICZNA PREZENTACJA WYNIKOW dla metod podzialu**
+
+Z tablic wyzej widzimy, ze dla grupowania podzialowego **indeksy G1, G2, G3 i S** nie maja istotnego sensu. Wiecej o tym bedzie w sekcji **WNIOSKI**<br>
+Pozostaje metoda "ekspercka", czyli "na oko". Porownania kazdego grupowania bedzie w sekcji **WYBOR OPTYMALNYCH GRUPOWAN dla metody podzialowej oraz hierarchicznej** <br>
+Dla **metody k-means** ustawiamy liczbe podzialow = 2, 3 oraz 4. <br>
+```{r echo=FALSE}
+test1 <- kmeans(dfS, 2, nstart = 50, iter.max=50)
+
+fviz_cluster(test1, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-means with clusters = 2")
+
+test2 <- kmeans(dfS, 3, nstart = 50, iter.max=50)
+
+fviz_cluster(test2, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-means with clusters = 3")
+
+test3 <- kmeans(dfS, 4, nstart = 50, iter.max=50)
+
+fviz_cluster(test3, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-means with clusters = 4")
+```
+<br>
+To samo wynika z tablic dla **metody k-medoid** <br>
+Ustawimy z gory liczbe przedzialow = 2, 3 oraz 4.<br>
+```{r echo=FALSE}
+test1 <- pam(dfS, 2, metric = "euclidean")
+test2 <- pam(dfS, 2, metric = "manhattan")
+
+fviz_cluster(test1, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-medoids with clusters = 2, metric = Euclidean")
+fviz_cluster(test2, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-medoids with clusters = 2, metric = manhattan")
+```
+<br>
+Porownujac podzial na 2 grupy wedlug metody **k-srednich** i **k-medoid** widac roznice, mianowicie metoda **k-medoid** ma wspolny fragment pomiedzy grupami widoczny na wykresach.<br>
+Rowniez widac, ze w metryce **"manhattan"** zbior danych zostal podzielony na pol, a w metryce **Euklidesa** dominuje <span style="color: blue;">niebieski</span> cluster. <br>
+Byla podjeta proba eliminacji wspolnego fragmentu poprzez zwiekszenie liczby clusterow, wynik znajduje sie ponizej. <br>
+```{r echo=FALSE}
+test1 <- pam(dfS, 3, metric = "euclidean")
+test2 <- pam(dfS, 3, metric = "manhattan")
+
+fviz_cluster(test1, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-medoids with clusters = 3, metric = Euclidean")
+fviz_cluster(test2, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-medoids with clusters = 3, metric = manhattan")
+```
+```{r echo=FALSE}
+test1 <- pam(dfS, 4, metric = "euclidean")
+test2 <- pam(dfS, 4, metric = "manhattan")
+
+fviz_cluster(test1, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-medoids with clusters = 4, metric = Euclidean")
+fviz_cluster(test2, data = df, geom = "point", ellipse.type = "convex",
+              ggtheme = theme_bw(), main = "Cluster plot for k-medoids with clusters = 4, metric = manhattan")
+```
+<br>
+Z wykresow wyzej widac, ze dla liczby podzialow = 3, w metryce **Euklidesa oraz manhattan** i dla liczby podzialow = 4 w metryce **manhattan** grupy zostaly mocno pomieszane. <br>
+Na razie "najlepiej" wyglada podzial **k-medoids, metryka Euklidesa**. <br>
+## **GRAFICZNA PREZENTACJA WYNIKOW dla metody hierarchicznej, metoda "ward.D"**
+
+Z tablic dla **metody hierarchicznej** typu **ward.D** widac nastepujaca tendencje: <br>
+1.**indeksy G1** ma najwieksza wartosc dla liczby skupien = 2 w metryce **Euklidesa oraz Minkowskiego**, dla **metryki manhattan** optymalna liczba skupien = 3. <br>
+2.**indeksy G2** rosnie wraz z wzrostem liczby podzialow. <br>
+3.**indeks G3** jest quazi" staly. <br>
+4.**indeks S** jest optymalny dla liczby skupien = 2 dla kazdej z metryk. <br>
+
+Ze wzgledu na powyzsze sprawdzimy dendrogramy dla liczby skupien = 2 oraz 3. <br>
+Najpierw bedzie przedstawiony dendrogram dla liczby skupien = 2 dla kazdej z metryk. <br>
+```{r echo=FALSE}
+fviz_dend(HC.E, k = 2, main = "Dendrogram for clusters = 2, metric Euclidean, method = ward.D") 
+fviz_dend(HC.MAN, k = 2, main = "Dendrogram for clusters = 2, metric manhattan, method = ward.D") 
+fviz_dend(HC.MIN,k = 2, main = "Dendrogram for clusters = 2, metric Minkowski, method = ward.D") 
+```
+<br>
+Widzimy, ze w przypadku **metryki Euklidesowej**, zbior danych zostal podzielony prawie na identyczne grupy ze wzgledu na liczbe graczy. <br>
+W przypadku metryki **manhattan** oraz **Minkowskiego** widac skosnosc prawostronna. <br>
+Rowniez widac, ze **metryka** wplywa istotnie na "postac" klastrow. <br>
+Dalej beda przedstawione dendrogramy dla liczby skupien = 3. <br>
+```{r echo=FALSE}
+fviz_dend(HC.E, k = 3, main = "Dendrogram for clusters = 3, metric Euclidean, method = ward.D") 
+fviz_dend(HC.MAN, k = 3, main = "Dendrogram for clusters = 3, metric manhattan, method = ward.D") 
+fviz_dend(HC.MIN,k = 3, main = "Dendrogram for clusters = 3, metric Minkowski, method = ward.D") 
+```
+<br>
+Metryka **manhattan** podzielila zbior danych mniej wiecej po rowno, co odzwierciedla tablica. (optymalna wartosc **indeksu G1**)<br>
+
+## **OPTYMALNA LICZBA SKUPIEN dla metody hierarchicznej, metoda "average" oraz "complete"**
+
+Teraz zobaczymy, czy liczba skupien zmienia sie w zaleznosci od metody "aglomeracji". <br>
+```{r echo=FALSE}
+HCM.E <- hclust(EU, method = "average") # metryka euklidesowa
+HCM.MAN <- hclust(MAN, method = "average") # metryka manhattan
+HCM.MIN <- hclust(MIN, method = "average") # metryka minkowski
+ 
+HCC.E <- hclust(EU, method = "complete") # metryka euklidesowa
+HCC.MAN <- hclust(MAN, method = "complete") # metryka manhattan
+HCC.MIN <- hclust(MIN, method = "complete") # metryka minkowski
+
+OptM_EU <- BI("H", HCM.E, EU) # optymalna liczba skupien, metryka Euklidesa
+OptM_MAN <- BI("H", HCM.MAN, MAN) # optymalna liczba skupien, metryka "manhattan"
+OptM_MIN <- BI("H", HCM.MIN, MIN) # optymalna liczba skupien, metryka Minkowskiego
+ 
+OptC_EU <- BI("H", HCC.E, EU) # optymalna liczba skupien, metryka Euklidesa
+OptC_MAN <- BI("H", HCC.MAN, MAN) # optymalna liczba skupien, metryka "manhattan"
+OptC_MIN <- BI("H", HCC.MIN, MIN) # optymalna liczba skupien, metryka Minkowskiego
+```
+Dla metody **average**, metryka **Euklidesa**. <br>
+```{r echo=FALSE}
+OptM_EU<-data.frame(OptM_EU,row.names = rnames)
+colnames(OptM_EU) <- cnames
+OptM_EU
+```
+Dla metody **average**, metryka **manhattan**. <br>
+```{r echo=FALSE}
+OptM_MAN<-data.frame(OptM_MAN,row.names = rnames)
+colnames(OptM_MAN) <- cnames
+OptM_MAN
+```
+Dla metody **average**, metryka **Minkowskiego**. <br>
+```{r echo=FALSE}
+OptM_MIN<-data.frame(OptM_MIN,row.names = rnames)
+colnames(OptM_MIN) <- cnames
+OptM_MIN
+```
+Dla metody **complete**, metryka **Euklidesa**. <br>
+```{r echo=FALSE}
+OptC_EU<-data.frame(OptC_EU,row.names = rnames)
+colnames(OptC_EU) <- cnames
+OptC_EU
+```
+Dla metody **complete**, metryka **manhattan**. <br>
+```{r echo=FALSE}
+OptC_MAN<-data.frame(OptC_MAN,row.names = rnames)
+colnames(OptC_MAN) <- cnames
+OptC_MAN
+```
+Dla metody **complete**, metryka **Minkowskiego**. <br>
+```{r echo=FALSE}
+OptC_MIN<-data.frame(OptC_MIN,row.names = rnames)
+colnames(OptC_MIN) <- cnames
+OptC_MIN
+```
+## **GRAFICZNA PREZENTACJA WYNIKOW dla metody hierarchicznej, metoda "average" oraz "complete"**
+
+Widzimy z tablic powyzej, ze **"dominujaca"** wedlug wszystkich indeksow jest liczba skupien = 2. <br>
+Tendencja dla **indeksu G2** jak i w przypadku metody **ward.D** pozostala, natomiast widzimy, ze wraz z wzrostem liczby skupien rosnie wartosc **indeksu G3** i to jest kolejna wskazowka na to, ze liczba skupien = 2 jest optymalna. <br>
+Sprawdzimy dendrogramy dla liczby skupien = 2 oraz 3. <br>
+Najpierw dla metody **average**. <br>
+```{r echo=FALSE}
+fviz_dend(HCM.E, k = 2, main = "Dendrogram for clusters = 2, metric Euclidean, method = average") 
+fviz_dend(HCM.MAN, k = 2, main = "Dendrogram for clusters = 2, metric manhattan, method = average") 
+fviz_dend(HCM.MIN,k = 2, main = "Dendrogram for clusters = 2, metric Minkowski, method = average") 
+```
+<br>
+Widzimy, ze w porownaniu do metody **"ward.D"**, metoda **average** dzieli zbior danych mocno "jednostronnie", to znaczy widac jedna grupe o malej liczbie graczy. Metryka **Euklides** i **"Minkowskiego"** pokazuje prawie identyczne wyniki, w przypadku drugiej metryki grupa jest nieco wieksza. <br>
+Metryka **manhattan** "odzwierciedla" wyniki dla poprzednich metryk. <br>
+Dendrogramy dla metody **complete**. <br>
+```{r echo=FALSE}
+fviz_dend(HCC.E, k = 2, main = "Dendrogram for clusters = 2, metric Euclidean, method = complete") 
+fviz_dend(HCC.MAN, k = 2, main = "Dendrogram for clusters = 2, metric manhattan, method = complete") 
+fviz_dend(HCC.MIN,k = 2, main = "Dendrogram for clusters = 2, metric Minkowski, method = complete") 
+```
+<br>
+W przeciwienstwie do metody **average**, metoda **complete** ma podobne wyniki dla metryk **manhattan** i **Minkowskiego**. <br>
+Natomiast metryka **Euklidesowa** odzwierciedla wyniki poprzednich metryk. <br>
+Widzimy podobienstwo metod **average** i **complete** w podziale zbioru danych na mniejsza i wieksza grupe. <br>
+
+W przypadku metody **complete** widzimy, ze istotnym jest sprawdzic liczbe skupien = 3. Na dendrogramach widac mozliwy podzial na wieksza liczbe skupien. <br>
+```{r echo=FALSE}
+fviz_dend(HCC.E, k = 3, main = "Dendrogram for clusters = 3, metric Euclidean, method = complete") 
+fviz_dend(HCC.MAN, k = 3, main = "Dendrogram for clusters = 3, metric manhattan, method = complete") 
+fviz_dend(HCC.MIN,k = 3, main = "Dendrogram for clusters = 3, metric Minkowski, method = complete") 
+```
+<br>
+Widzimy, ze chociaz w przypadku metryk **Euklidesa** i **manhattan** roznica nie jest az tak spora w porownaniu do liczby skupien = 2, natomiast w przypadku metryki **Minkowskiego** zbior danych zostal podzielony na 3 charakterystyczne klastry. <br>
+Dla metody **average** proba zwiekszenia liczby skupien nie powiodla sie, wyniki byly znikome i nie maja istotnego sensu do prezentacji. <br>
+
+##** WYBOR OPTYMALNYCH GRUPOWAN dla metody podzialowej oraz hierarchicznej**
+
+Dla metody **k-srednich** powstaje wybor pomiedzy 2, 3 oraz 4 grupami. Wybieramy metryke **Euklidesa**. Porownywac bedziemy na bazie **indeksu CH** oraz **entropii** poprzez funkcje **cluster.stats**. GRUPOWANIE z **wiekszym** CH i **mniejsza** entropia jest lepsze. <br>
+```{r echo=FALSE}
+km2 <- kmeans(dfS,2,nstart=50,iter.max = 50)
+km3 <- kmeans(dfS,3,nstart=50,iter.max = 50)
+km4 <- kmeans(dfS,4,nstart=50,iter.max = 50)
+
+.km2 <- cluster.stats(EU, km2$cluster)
+.km3 <- cluster.stats(EU, km3$cluster)
+.km4 <- cluster.stats(EU, km4$cluster)
+
+print(w1 <- c(.km2$ch,.km2$entropy,"GRUP = 2"))
+print(w2 <- c(.km3$ch,.km3$entropy,"GRUP = 3"))
+print(w3 <- c(.km4$ch,.km4$entropy,"GRUP = 4"))
+```
+Widzimy, ze dla liczby podzialow = 2 sa najlepsze wyniki. Ostatecznie dla metody **k-srednich** wybieramy podzial na 2 grupy. <br>
+
+Dla metody **k-medoid** powstaje wybor rowniez pomiedzy 2, 3 oraz 4 podzialami, ale w przypadku medoid jest jeszcze podzial na metryki. <br>
+```{r echo=FALSE}
+kE2 <- pam(dfS, 2, metric = "euclidean")
+kE3 <- pam(dfS, 3, metric = "euclidean")
+kE4 <- pam(dfS, 4, metric = "euclidean")
+kM2 <- pam(dfS, 2, metric = "manhattan")
+kM3 <- pam(dfS, 3, metric = "manhattan")
+kM4 <- pam(dfS, 4, metric = "manhattan")
+
+.kE2 <- cluster.stats(EU, kE2$clustering)
+.kE3 <- cluster.stats(EU, kE3$clustering)
+.kE4 <- cluster.stats(EU, kE4$clustering)
+.kM2 <- cluster.stats(MAN, kM2$clustering)
+.kM3 <- cluster.stats(MAN, kM3$clustering)
+.kM4 <- cluster.stats(MAN, kM4$clustering)
+
+print(w1 <- c(.kE2$ch,.kE2$entropy,"GRUP = 2", "Euklides"))
+print(w2 <- c(.kE3$ch,.kE3$entropy,"GRUP = 3", "Euklides"))
+print(w3 <- c(.kE4$ch,.kE4$entropy,"GRUP = 4", "Euklides"))
+print(" ")
+print(w4 <- c(.kM2$ch,.kM2$entropy,"GRUP = 2", "manhattan"))
+print(w5 <- c(.kM3$ch,.kM3$entropy,"GRUP = 3", "manhattan"))
+print(w6 <- c(.kM4$ch,.kM4$entropy,"GRUP = 4", "manhattan"))
+
+```
+Widzimy, ze najlepsze wyniki sa w przypadku podzialu na 2 grupy, metryka **manhattan**, co potwierdza wykres przedstawiony w poprzedniej czesci. <br>
+
+Dla metody **ward.D** wyniki dla liczby 2 oraz 3 sa nastepujace. <br>
+```{r echo=FALSE}
+wE2 <- cutree(HC.E,2)
+wMA2 <- cutree(HC.MAN,2)
+wMI2 <- cutree(HC.MIN,2)
+wE3 <- cutree(HC.E,3)
+wMA3 <- cutree(HC.MAN,3)
+wMI3 <- cutree(HC.MIN,3)
+
+.wE2 <- cluster.stats(EU, wE2)
+.wMA2 <- cluster.stats(MAN, wMA2)
+.wMI2 <- cluster.stats(MIN, wMI2)
+.wE3 <- cluster.stats(EU, wE3)
+.wMA3 <- cluster.stats(MAN, wMA3)
+.wMI3 <- cluster.stats(MIN, wMI3)
+
+print(w1 <- c(.wE2$ch,.wE2$entropy,"GRUP = 2","Euklides","method = ward.D"))
+print(w2 <- c(.wMA2$ch,.wMA2$entropy,"GRUP = 2", "manhattan","mehtod = ward.D"))
+print(w3 <- c(.wMI2$ch,.wMI2$entropy,"GRUP = 2", "Minkowski","method = ward.D"))
+print(" ")
+print(w4 <- c(.wE3$ch,.wE3$entropy,"GRUP = 3", "Euklides","method = ward.D"))
+print(w5 <- c(.wMA3$ch,.wMA3$entropy,"GRUP = 3", "manhattan","method = ward.D"))
+print(w6 <- c(.wMI3$ch,.wMI3$entropy,"GRUP = 3", "Minkowski","method = ward.D"))
+
+```
+Widzimy, ze najlepsze wynik jest w przypadku podzialu na 2 liczby skupien, metryka **manhattan**.
+
+Dla metod **average** oraz **complete**, liczba skupien = 2, dla poszczegolnych metryk wyniki sa nastepujace.
+```{r echo=FALSE}
+wcE2 <- cutree(HCC.E,2)
+wcMA2 <- cutree(HCC.MAN,2)
+wcMI2 <- cutree(HCC.MIN,2)
+waE2 <- cutree(HCM.E,2)
+waMA2 <- cutree(HCM.MAN,2)
+waMI2 <- cutree(HCM.MIN,2)
+
+wcE3 <- cutree(HCC.E,3)
+wcMA3 <- cutree(HCC.MAN,3)
+wcMI3 <- cutree(HCC.MIN,3)
+
+.wcE2 <- cluster.stats(EU, wcE2)
+.wcMA2 <- cluster.stats(MAN, wcMA2)
+.wcMI2 <- cluster.stats(MIN, wcMI2)
+.waE2 <- cluster.stats(EU, waE2)
+.waMA2 <- cluster.stats(MAN, waMA2)
+.waMI2 <- cluster.stats(MIN, waMI2)
+
+.wcE3 <- cluster.stats(EU, wcE3)
+.wcMA3 <- cluster.stats(MAN, wcMA3)
+.wcMI3 <- cluster.stats(MIN, wcMI3)
+
+print(w1 <- c(.wcE2$ch,.wcE2$entropy,"GRUP = 2","Euklides","method = complete"))
+print(w2 <- c(.wcMA2$ch,.wcMA2$entropy,"GRUP = 2","manhattan","method = complete"))
+print(w3 <- c(.wcMI2$ch,.wcMI2$entropy,"GRUP = 2","Minkowski","method = complete"))
+print(" ")
+print(w4 <- c(.waE2$ch,.waE2$entropy,"GRUP = 2","Euklides","method=average"))
+print(w5 <- c(.waMA2$ch,.waMA2$entropy,"GRUP = 2","manhattan","method=average"))
+print(w6 <- c(.waMI2$ch,.waMI2$entropy,"GRUP = 2","Minkowski","method=average"))
+print(" ")
+print(w7 <- c(.wcE3$ch,.wcE3$entropy,"GRUP = 3","Euklides","method = complete"))
+print(w8 <- c(.wcMA3$ch,.wcMA3$entropy,"GRUP = 3","manhattan","method = complete"))
+print(w9 <- c(.wcMI3$ch,.wcMI3$entropy,"GRUP = 3","Minkowski","method = complete"))
+```
+Widzimy, ze optymalna liczba skupien zostala osiagnieta w przypadku **metody complete** dla liczby skupien = 2 **metryka Euklidesa**, ale **entropia** jest mniejsza dla metryki **manhattan** wiec jednoznacznie stwierdzic, ktory z podzialow jest lepszy jest ciezko. <br>
+
+##**WNIOSKI**
+
+Z tablic powyzej mozna wyciagnac dwie zaleznosci: <br>
+1. Metryka **manhattan** wykazuje najlepsze wyniki dla kazdej z metod.<br>
+2. **Zwiekszenie** liczby podzialu/skupien **pogarsza** effekt koncowy.<br>
+
+**Celem projketu** bylo sprawdzenie zachowania roznych metod grupowania na danych "realnych". Optymalna liczba podzialow/skupien ze wzgledu na wyniki **indeksow G1,G2,G3 oraz S** byla ustalona przy pomocy **indeksu CH** oraz **entropii** i wyniosla 2 dla **metod hierarchicznych**. <br>
+W przypadku **metod podzialowych** indeksy nie spisaly sie dobrze, raczej ich wklad w analize byl znikomy.
+
+Natomiast **Hipoteza badawcza** potwierdzila sie, effektem koncowy dla obu metod grupowania stala liczba skupien/podzialow = 2. <br>
+Jezeli jeszcze raz popatrzymy na wykresy podzialu na 2 grupy wedlug metod **k-srednich** i **k-medoid**, zauwazymy ze podzial jest prawie idenyczny, z tym, ze w przypadku drugiej metody wystepuje fragment wspolny. Metryka **manhattan** w tym przypadku spisuje sie lepiej, co potwierdza wykres (dane sa prawie podzielone na pol) oraz wyniki porownawcze (CH = 262.12, entropia = 0.612), lepsze niz w przypadku **metody k-means**. <br>
+
+W przypadku **metod hierarchicznych** dominujaca liczba skupien jest 2. Z tablic wyzej widzimy, ze najlepszy wynik jest dla metody **ward.D** z metryka **manhattan**. Metoda **average** osiagnela najgorsze wyniki sposrod wszystkich. <br>
+Popatrzymy teraz na wykresy z metryka **manhattan** dla kazdego typu metod hierarchicznych. Widzimy, ze w porownaniu do pozostalych metryk, podzial metryka **manhattan** "wygladza" dane. Klastry przyjmuja forme schodow, co wizualizuje dlaczego metryka **manhattan** osiagnela optymalne wyniki w kazdym z przypadkow. <br>
+
+Zauwazmy, ze metryka **Minkowskiego** jest tak naprawde metryka **Euklidesa** o wiekszej potedze. To tlumaczy dlaczego wyniki sa gorsze w przypadku owej metryki. Natomiast w przypadku metryki **manhattan** odległość dwóch punktów w tej metryce to suma wartości bezwzględnych różnic ich współrzędnych, co wskazuje, ze zmniejszenie potegi we wzorze do obliczania odleglosci moze powodowac lepszy effekt koncowy obliczen. Tylko w jednym przypadku metody **hierarchicznej** typu **complete** dla 2 klastrow metryka **Euklidesa** miala lepszy wynik od **manhattan** ale tylko o 11 jednostek, co tak naprawde jest znikome. <br>
+
+Chociaz, wedlug obliczen dla metody **hierarchicznej** kazdego typu najlepsze wyniki osiagniete w przypadku 2 skupien, wizualnie najlepiej wyglada podzial na 3 klastry metoda **complete** w metryce **Minkowskiego**, co kieruje na mysl, ze nie zawsze wyniki "suchych" obliczen sa najlepszymi podstawami dla wnioskow koncowych.
+
+##**DZIEKUJE ZA UWAGE**
